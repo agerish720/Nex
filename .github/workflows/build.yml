@@ -1,96 +1,42 @@
-name: Android Build
+name: CI
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-env:
-  PYTHON_VERSION: "3.10"
-  ANDROID_SDK_TOOLS_VERSION: "9477386"
-  ANDROID_BUILD_TOOLS_VERSION: "34.0.0"
-  ANDROID_NDK_VERSION: "25b"
-  ANDROID_PLATFORM_VERSION: "34"
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      # used to cache dependencies with a timeout
+      - name: Get Date
+        id: get-date
+        run: |
+          echo "::set-output name=date::$(/bin/date -u "+%Y%m%d")"
+        shell: bash
+
+      - name: Cache Buildozer global directory
+        uses: actions/cache@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          path: .buildozer_global
+          key: buildozer-global-${{ hashFiles('buildozer.spec') }} # Replace with your path
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            git unzip openjdk-17-jdk \
-            python3-pip autoconf libtool pkg-config \
-            zlib1g-dev libncurses5-dev libssl-dev
+      - uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: ${{ runner.os }}-${{ steps.get-date.outputs.date }}-${{ hashFiles('buildozer.spec') }}
 
-      - name: Set up Android SDK
-        run: |
-          # Create Android SDK directory structure
-          mkdir -p ~/android-sdk/cmdline-tools/latest
-          mkdir -p ~/.android/licenses
-          
-          # Download and extract command line tools
-          cd ~/android-sdk
-          wget -q https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_SDK_TOOLS_VERSION}_latest.zip -O cmdline-tools.zip
-          unzip -qq cmdline-tools.zip -d cmdline-tools/latest
-          rm cmdline-tools.zip
-          
-          # Set environment variables
-          export ANDROID_SDK_ROOT=~/android-sdk
-          export PATH=$PATH:~/android-sdk/cmdline-tools/latest/bin
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "PATH=$PATH" >> $GITHUB_ENV
-          
-          # Create license files
-          echo -e "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nyes" > ~/.android/licenses/android-sdk-license
-          echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd\nyes" > ~/.android/licenses/android-sdk-preview-license
-          echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee\nyes" > ~/.android/licenses/android-sdk-arm-dbt-license
-          
-          # Install required components
-          sdkmanager --verbose "platform-tools" "build-tools;$ANDROID_BUILD_TOOLS_VERSION" "platforms;android-$ANDROID_PLATFORM_VERSION" "ndk;$ANDROID_NDK_VERSION"
-          echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
-          echo "$ANDROID_SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION" >> $GITHUB_PATH
+      - name: Build with Buildozer
+        uses: ArtemSBulgakov/buildozer-action@v4
+        id: buildozer
+        with:
+          command: buildozer android debug
+          buildozer_version: master
 
-      - name: Install Buildozer
-        run: |
-          python -m pip install --upgrade pip
-          pip install buildozer cython==0.29.33 virtualenv
-
-      - name: Configure Buildozer
-        run: |
-          export PATH=$PATH:~/.local/bin
-          if [ ! -f buildozer.spec ]; then
-            buildozer init
-            echo "[app]" > buildozer.spec
-            echo "title = MyApp" >> buildozer.spec
-            echo "package.name = myapp" >> buildozer.spec
-            echo "package.domain = org.test" >> buildozer.spec
-            echo "requirements = python3,kivy" >> buildozer.spec
-            echo "android.ndk = $ANDROID_NDK_VERSION" >> buildozer.spec
-            echo "android.sdk_path = $ANDROID_SDK_ROOT" >> buildozer.spec
-            echo "android.build_tools_version = $ANDROID_BUILD_TOOLS_VERSION" >> buildozer.spec
-            echo "android.api = $ANDROID_PLATFORM_VERSION" >> buildozer.spec
-          fi
-
-      - name: Build APK
-        run: |
-          export PATH=$PATH:~/.local/bin:$ANDROID_SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION
-          buildozer -v android debug
-
-      - name: Upload APK
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: bin/*.apk
-          retention-days: 7
-          if-no-files-found: error
+          name: package
+          path: ${{ steps.buildozer.outputs.filename }}

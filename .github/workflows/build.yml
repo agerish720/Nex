@@ -24,35 +24,30 @@ jobs:
         with:
           python-version: '3.8'
 
-      - name: Install Buildozer
+      - name: Install Buildozer and dependencies
         run: |
           python -m pip install --upgrade pip
           pip install buildozer cython==0.29.33 virtualenv
 
-      - name: Configure Buildozer (safe initialization)
+      - name: Handle buildozer.spec
         run: |
           export PATH=$PATH:~/.local/bin
+          # Ne pas initialiser si le fichier existe déjà
           if [ ! -f buildozer.spec ]; then
             buildozer init
+            echo "[app]" > buildozer.spec
+            echo "requirements = python3,kivy" >> buildozer.spec
+            echo "android.ndk = 25b" >> buildozer.spec
+          else
+            echo "buildozer.spec exists - using existing configuration"
           fi
-          # Ensure minimum required configuration
-          echo "[app]
-title = MyApp
-package.name = myapp
-package.domain = org.test
-source.dir = .
-version = 0.1
-requirements = python3,kivy
-android.api = 33
-android.minapi = 21
-android.ndk = 25b" > buildozer.spec
 
-      - name: Build APK
+      - name: Build APK with Buildozer
         run: |
           export PATH=$PATH:~/.local/bin
           buildozer -v android debug
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
